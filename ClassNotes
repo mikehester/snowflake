@@ -1,0 +1,231 @@
+create or replace TABLE USERS (
+    ID NUMBER(38,0),
+    FIRST_NAME VARCHAR(16777216),
+    LAST_NAME VARCHAR(60),
+    EMAIL VARCHAR(16777216),
+    GENDER VARCHAR(16777216),
+    IP_ADDRESS VARCHAR(16777216)
+);
+
+LIST @%users
+
+
+put file://{pathtofile}\filename @%users -- into stage
+
+copy into users from @%users file_format = (skip_header=1)
+
+remove @%users
+
+
+--create named stage
+create stage mystage;
+
+show stages;
+
+
+list @mystage;
+--put file://C:\Users\mhest\Downloads\snowflaketraining-main\Users_data_1.csv @mystage -- into named stage
+
+copy into users from @mystage file_format = (skip_header=1)
+
+--
+
+--multiple files
+
+create stage mystage1
+
+--put file://C:\Users\mhest\Downloads\snowflaketraining-main\*.csv @mystage1
+--put file://C:\Users\mhest\Downloads\snowflaketraining-main\*.csv @mystage1 overwrite = true
+--put file://C:\Users\mhest\Downloads\snowflaketraining-main\*.csv @mystage1 parallel = 5
+
+
+list @mystage1
+
+--- validate load and returns all errors and loads nothing
+
+copy into users
+from @mystage1
+file_format = (skip_header=1)
+validation_mode = return_all_errors
+
+-- will continue even if error
+
+copy into users
+from @mystage1
+file_format = (skip_header=1)
+on_error = 'continue'
+
+--increase error threshold
+truncate users
+
+copy into users
+from @mystage1
+file_format = (skip_header=1)
+on_error = 'skip_file_10'
+
+--or %
+copy into users
+from @mystage1
+file_format = (skip_header=1)
+on_error = 'skip_file_10%'
+
+--abort
+
+copy into users
+from @mystage1
+file_format = (skip_header=1)
+on_error = 'abort_statement'
+
+--force
+copy into users
+from @mystage1
+file_format = (skip_header=1)
+on_error = 'continue'
+
+delete from users
+
+copy into users
+from @mystage1
+file_format = (skip_header=1)
+on_error = 'continue'
+force = true
+
+select count(*) from users
+
+--filter
+truncate users
+
+copy into users
+from @mystage1
+file_format = (skip_header=1)
+on_error = 'continue'
+files = ('Users_data_1.csv.gz','Users_data_2.csv.gz')
+
+-- regular expression
+
+copy into users
+from @mystage1
+file_format = (skip_header=1)
+on_error = 'continue'
+files = ('.*User*.')
+
+create table rejected_rows as (select * from table(validate(users,job_id=>'01a81611-0001-82cb-0000-00026f073095')))
+
+
+                    
+select last_query_id()
+-------
+
+--purge
+
+copy into users
+from @mystage1
+file_format = (skip_header=1)
+on_error = 'continue'
+force = true
+purge = true
+list @mystage1
+
+
+-- read data directly to stage
+
+select $1,$2 from @mystage1
+
+show parameters
+
+--json
+
+create or replace stage mystage4
+
+--load file via put
+
+list @mystage4
+
+create file format myjson type = json ;
+
+-- multiple rows
+select $1 from @mystage4 ;
+
+-- reads all json as a single column
+select $1 from @mystage4 (file_format => 'myjson') ;
+
+select $1:deptName,$1:deptno,$1:deptLocation from @mystage4 (file_format => 'myjson') ;
+
+--enforce data type
+
+select $1:deptName::string,$1:deptno,$1:deptLocation from @mystage4 (file_format => 'myjson') ;
+
+--alias
+
+select $1:deptName::string mdept_name,$1:deptno,$1:deptLocation from @mystage4 (file_format => 'myjson') ;
+
+--nested array
+-- EmployeeDtls is an array
+select $1:deptName::string mdept_name,$1:deptno,$1:deptLocation,$1:EmployeeDtls from @mystage4 (file_format => 'myjson') ;
+
+--extract nested columns using lateral flatten
+
+select dept.$1:deptName::string dept_name,dept.$1:deptno,dept.$1:deptLocation, dept.$1:EmployeeDtls from @mystage4 (file_format => 'myjson') dept,
+lateral flatten (input=>$1:EmployeeDtls) emp ;
+
+
+select dept.$1:deptName::string deptname, dept.$1:deptno,dept.$1:deptLocation,dept.$1:deptLocState, emp.value from @mystage4 (file_format => 'myjson') dept,
+lateral flatten (input=>$1:EmployeeDtls) emp;
+
+--flattens all nested columns
+select dept.$1:deptName::string dept_name,dept.$1:deptno,dept.$1:deptLocation,dept.$1:deptLocState, emp.value:empno,emp.value:ename,emp.value:job, emp.value:hiredate from @mystage4 (file_format => 'myjson') dept,
+lateral flatten (input=>$1:EmployeeDtls) emp;
+
+-- multi nested columns
+
+remove @mystage4
+
+
+-- put command into @mystage
+
+--create table
+
+create table myjson (json_data variant) -- variant 16mb for each row
+
+select * from myjson
+
+copy into myjson
+from @mystage4
+file_format = myjson
+
+select * from myjson
+
+select 
+empdt.value:kind,
+empdt.value:fullName,
+empdt.value:age,
+empdt.value:gender,
+empdt.value:phoneNumber.areaCode,
+empdt.value:phoneNumber.number,
+empchild.value:name,
+empchild.value:gender,
+empchild.value:age,
+emplived.value:place,
+yl.value yearslived
+from myjson emp,
+lateral flatten (input=>json_data:empDetails) empdt,
+lateral flatten (input=>empdt.value:children,outer=> TRUE) empchild,
+lateral flatten (input=>empdt.value:citiesLived,outer=> TRUE) emplived,
+lateral flatten (input=>emplived.value:yearsLived,outer=> TRUE) yl
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
